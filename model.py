@@ -313,8 +313,10 @@ class RawGAT_ST(nn.Module):
         
         self.selu = nn.SELU(inplace=True)
    
-        # Please not that here you can also use only one encoder to reduce the network parameters which is jsut half of the 0.44M (mentioned in the paper). I was doing some subband analysis and forget to remove the use of two encoders.  I also checked with one encoder and found same results. 
-        self.encoder1=nn.Sequential(
+        # Please Note that here you can also use only one encoder to reduce the network parameters which is 0.22 M parameters only. I was doing some subband analysis and forget to remove the use of two encoders.  I also checked with one encoder and found same results. 
+        # Better to use single rawnet encoder to extract 2-D feature representation from raw audio waveform. This thing we alredy modified in AASIST anti-spoofing model (extension of RawGAT-ST model).
+	
+	self.encoder1=nn.Sequential(
                         nn.Sequential(Residual_block(nb_filts = d_args['filts'][1], first = True)),
                         nn.Sequential(Residual_block(nb_filts = d_args['filts'][2])),
                         nn.Sequential(Residual_block(nb_filts = d_args['filts'][3])),
@@ -378,7 +380,7 @@ class RawGAT_ST(nn.Module):
             x=self.conv_time(x,mask=False)
         
         """
-        Different with the our RawNet2 model, we interpret the output of sinc-convolution layer as 2-dimensional image with one channel (like 2-D representation).
+        Different to the our RawNet2 model, here we interpret the output of sinc-convolution layer as 2-dimensional image with one channel (like 2-D representation).
         """
         x = x.unsqueeze(dim=1)  # 2-D (#bs,1,sinc-filt(70),64472)
         
@@ -443,83 +445,3 @@ class RawGAT_ST(nn.Module):
             if i == 0: nb_filts[0] = nb_filts[1]
             
         return nn.Sequential(*layers)
-
-    
-    
-    def summary(self, input_size, batch_size=-1, device="cuda", print_fn = None):
-        if print_fn == None: printfn = print
-        model = self
-        
-        def register_hook(module):
-            def hook(module, input, output):
-                class_name = str(module.__class__).split(".")[-1].split("'")[0]
-                module_idx = len(summary)
-                
-                m_key = "%s-%i" % (class_name, module_idx + 1)
-                summary[m_key] = OrderedDict()
-                summary[m_key]["input_shape"] = list(input[0].size())
-                summary[m_key]["input_shape"][0] = batch_size
-                if isinstance(output, (list, tuple)):
-                    summary[m_key]["output_shape"] = [
-						[-1] + list(o.size())[1:] for o in output
-					]
-                else:
-                    summary[m_key]["output_shape"] = list(output.size())
-                    if len(summary[m_key]["output_shape"]) != 0:
-                        summary[m_key]["output_shape"][0] = batch_size
-                        
-                params = 0
-                if hasattr(module, "weight") and hasattr(module.weight, "size"):
-                    params += torch.prod(torch.LongTensor(list(module.weight.size())))
-                    summary[m_key]["trainable"] = module.weight.requires_grad
-                if hasattr(module, "bias") and hasattr(module.bias, "size"):
-                    params += torch.prod(torch.LongTensor(list(module.bias.size())))
-                summary[m_key]["nb_params"] = params
-                
-            if (
-				not isinstance(module, nn.Sequential)
-				and not isinstance(module, nn.ModuleList)
-				and not (module == model)
-			):
-                hooks.append(module.register_forward_hook(hook))
-                
-        device = device.lower()
-        assert device in [
-			"cuda",
-			"cpu",
-		], "Input device is not valid, please specify 'cuda' or 'cpu'"
-        
-        if device == "cuda" and torch.cuda.is_available():
-            dtype = torch.cuda.FloatTensor
-        else:
-            dtype = torch.FloatTensor
-        if isinstance(input_size, tuple):
-            input_size = [input_size]
-        x = [torch.rand(2, *in_size).type(dtype) for in_size in input_size]
-        summary = OrderedDict()
-        hooks = []
-        model.apply(register_hook)
-        model(*x)
-        for h in hooks:
-            h.remove()
-            
-        print_fn("----------------------------------------------------------------")
-        line_new = "{:>20}  {:>25} {:>15}".format("Layer (type)", "Output Shape", "Param #")
-        print_fn(line_new)
-        print_fn("================================================================")
-        total_params = 0
-        total_output = 0
-        trainable_params = 0
-        for layer in summary:
-            # input_shape, output_shape, trainable, nb_params
-            line_new = "{:>20}  {:>25} {:>15}".format(
-				layer,
-				str(summary[layer]["output_shape"]),
-				"{0:,}".format(summary[layer]["nb_params"]),
-			)
-            total_params += summary[layer]["nb_params"]
-            total_output += np.prod(summary[layer]["output_shape"])
-            if "trainable" in summary[layer]:
-                if summary[layer]["trainable"] == True:
-                    trainable_params += summary[layer]["nb_params"]
-            print_fn(line_new)
